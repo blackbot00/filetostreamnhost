@@ -5,50 +5,69 @@ const FormData = require('form-data');
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 bot.start((ctx) => {
-  ctx.reply("📤 *Welcome to File2Link Bot!*\n\nJust send me any *Photo, Video or Document*, and I will generate a direct download/stream link for you.", { parse_mode: 'Markdown' });
+  ctx.reply("🚀 *Fast File Downloader Bot*\n\nSend any file, and I will give you a direct download link.", { parse_mode: 'Markdown' });
 });
 
 bot.on(['photo', 'document', 'video', 'audio'], async (ctx) => {
+  let statusMsg;
   try {
-    ctx.reply("⏳ _Processing your file... Please wait._", { parse_mode: 'Markdown' });
+    statusMsg = await ctx.reply("📥 *Getting file info...*", { parse_mode: 'Markdown' });
 
     // 1. Get File ID
-    let fileId;
-    if (ctx.message.photo) fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-    else if (ctx.message.document) fileId = ctx.message.document.file_id;
-    else if (ctx.message.video) fileId = ctx.message.video.file_id;
-    else if (ctx.message.audio) fileId = ctx.message.audio.file_id;
+    let fileId, fileName = "file";
+    if (ctx.message.photo) {
+      fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+      fileName = "image.jpg";
+    } else if (ctx.message.document) {
+      fileId = ctx.message.document.file_id;
+      fileName = ctx.message.document.file_name;
+    } else if (ctx.message.video) {
+      fileId = ctx.message.video.file_id;
+      fileName = "video.mp4";
+    } else if (ctx.message.audio) {
+      fileId = ctx.message.audio.file_id;
+      fileName = "audio.mp3";
+    }
 
-    // 2. Get File Link from Telegram Server
+    // 2. Get Telegram Direct Link
     const fileUrl = await ctx.telegram.getFileLink(fileId);
 
-    // 3. Download from Telegram and Upload to Catbox.moe
-    const response = await axios.get(fileUrl.href, { responseType: 'stream' });
+    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "⚡ *Generating Download Link...*");
+
+    // 3. Upload to Catbox (Optimized)
+    const fileStream = await axios.get(fileUrl.href, { responseType: 'stream' });
     
     const form = new FormData();
     form.append('reqtype', 'fileupload');
-    form.append('fileToUpload', response.data);
+    form.append('fileToUpload', fileStream.data, { filename: fileName });
 
     const uploadRes = await axios.post('https://catbox.moe/user/api.php', form, {
-      headers: form.getHeaders()
+      headers: form.getHeaders(),
+      timeout: 300000 // 5 mins timeout
     });
 
-    const directLink = uploadRes.data;
+    const finalLink = uploadRes.data;
 
-    // 4. Send the result
-    ctx.reply(`✅ *File Uploaded Successfully!*\n\n🔗 *Link:* ${directLink}\n\n_You can use this link to stream or download anywhere!_`, {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [[{ text: "🌐 Open Link", url: directLink }]]
+    // 4. Send Result
+    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, 
+      `✅ *File Ready to Download!*\n\n📁 *Name:* \`${fileName}\` \n🔗 *Link:* ${finalLink}\n\n_Click the link to save it directly to your mobile._`, 
+      { 
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [[{ text: "📥 Download File", url: finalLink }]]
+        }
       }
-    });
+    );
 
   } catch (error) {
-    console.error(error);
-    ctx.reply("⚠️ *Error:* Something went wrong during upload. Make sure the file size is under 200MB.");
+    console.error("Error Detail:", error.message);
+    if (statusMsg) {
+      ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "❌ *Upload Failed!* \nMaybe the file is too large or server is slow.");
+    }
   }
 });
 
+// Nhost Export
 module.exports = async (req, res) => {
   if (req.method === 'POST') {
     try {
@@ -58,6 +77,6 @@ module.exports = async (req, res) => {
       res.status(200).send('OK');
     }
   } else {
-    res.status(200).send('File2Link Bot is Active!');
+    res.status(200).send('Downloader Bot Active!');
   }
 };
